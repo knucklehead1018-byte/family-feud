@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Family Feud — Firebase Host/Player</title>
+  <style>
+    /* (keep CSS from previous versions) */
+    :root{--bg:#111;--panel:#eee;--accent:gold}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;background:linear-gradient(180deg,#151515 0%, #0d0d0d 100%);color:#fff;padding:20px}
+    .container{display:flex;flex-wrap:wrap;gap:20px}
+    .panel{background:var(--panel);color:#000;padding:14px;border-radius:10px;flex:1;min-width:300px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+    input[type="text"]{width:100%;padding:8px;margin:6px 0;border-radius:6px;border:1px solid #ccc}
+    .answer-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+    .answer-row input{padding:6px;border-radius:6px;border:1px solid #bbb}
+    .buttons{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .btn{background:#222;color:#fff;padding:8px 10px;border-radius:8px;border:none;cursor:pointer}
+    .btn.secondary{background:#4b5563}
+    .scoreboard{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;align-items:center}
+    .team{background:#0f1724;color:var(--accent);padding:10px;border-radius:8px;min-width:150px;text-align:center}
+    .team .label{font-size:14px;opacity:.9}
+    .team .score{font-size:28px;font-weight:700;margin-top:6px}
+    .team-buttons{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+    .team-buttons button{background:var(--accent);border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-weight:700}
+    .game-board{flex:2;min-width:360px;background:var(--bg);padding:16px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.6);position:relative;perspective:1200px}
+    .game-board h1{margin:0 0 12px 0;text-align:center;font-size:20px}
+    #board-answers{display:grid;grid-template-columns:1fr;gap:10px}
+    .board-answer{height:56px;cursor:pointer;position:relative}
+    .card{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform .75s cubic-bezier(.2,.9,.2,1)}
+    .card.flipped{transform:rotateY(180deg)}
+    .card-front,.card-back{position:absolute;inset:0;border-radius:8px;display:flex;align-items:center;justify-content:space-between;backface-visibility:hidden;padding:0 14px;font-weight:700}
+    .card-front{background:#2b2b2b;border:2px solid #3b3b3b;color:#fff}
+    .card-back{background:#0b0b0b;border:3px solid var(--accent);color:var(--accent);transform:rotateY(180deg)}
+    .hidden-box{width:100%;height:28px;background:#333;border-radius:6px}
+    .strikes{display:flex;gap:8px;margin-top:14px;justify-content:center}
+    .strike{width:36px;height:36px;border-radius:50%;background:#444;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff}
+    .strike.active{background:#e11d48}
+    .buzzer-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.85);z-index:60;font-size:10rem;color:#e11d48;font-weight:900}
+    .final-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(0,0,0,.75),rgba(0,0,0,.92));z-index:100;flex-direction:column;padding:20px}
+    .final-card{background:linear-gradient(90deg,#111,#1b1b1b);border-radius:12px;padding:24px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.6);color:#fff;min-width:320px}
+    .final-card h2{margin:0 0 8px 0;font-size:28px}
+    .final-card p{margin:4px 0 12px 0;font-size:16px}
+    .final-buttons{display:flex;gap:10px;justify-content:center}
+    canvas.confetti{position:fixed;left:0;top:0;pointer-events:none;z-index:90}
+    @media (min-width:800px){#board-answers{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="panel">
+    <h2>Control Panel</h2>
+    <label>Room ID (any short name):</label>
+    <input id="roomId" type="text" value="family-room-1" />
+    <label>Question:</label>
+    <input id="question" type="text" value="Name something you bring to the beach" />
+    <h3 style="margin-top:12px">Answers (8)</h3>
+    <div id="answers"></div>
+    <div class="buttons">
+      <button class="btn" onclick="revealAll()">Reveal All</button>
+      <button class="btn secondary" onclick="clearBoard()">Clear</button>
+      <button class="btn" onclick="triggerBuzzer()">Buzzer (X)</button>
+      <button class="btn" onclick="nextRound()">Next Round</button>
+      <button class="btn" onclick="toggleSound()">Sound On/Off</button>
+      <button class="btn" onclick="showFinal()">Show Final Scores</button>
+      <button class="btn secondary" onclick="resetScores()">Reset Scores</button>
+      <button class="btn secondary" onclick="togglePlayerView()">Player View</button>
+    </div>
+    <div class="scoreboard">
+      <div class="team">
+        <div class="label">Team Lemons 🍋</div>
+        <div id="teamA" class="score">0</div>
+        <div class="team-buttons">
+          <button onclick="addPoints('A',10)">+10</button>
+          <button onclick="addPoints('A',50)">+50</button>
+          <button onclick="addPoints('A',-10)">-10</button>
+          <button onclick="addPoints('A',-50)">-50</button>
+        </div>
+      </div>
+      <div class="team">
+        <div class="label">Team Limes 🟢</div>
+        <div id="teamB" class="score">0</div>
+        <div class="team-buttons">
+          <button onclick="addPoints('B',10)">+10</button>
+          <button onclick="addPoints('B',50)">+50</button>
+          <button onclick="addPoints('B',-10)">-10</button>
+          <button onclick="addPoints('B',-50)">-50</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="game-board">
+    <h1 id="board-question">Name something you bring to the beach</h1>
+    <div id="board-answers"></div>
+    <div class="strikes" id="strikes"></div>
+  </div>
+</div>
+
+<div id="buzzer" class="buzzer-overlay" style="display:none">X</div>
+
+<div id="finalOverlay" style="display:none" class="final-overlay">
+  <div class="final-card">
+    <h2 id="finalTitle">Give it up for Team Lemons — our Family Feud Champions!</h2>
+    <p id="finalSubtitle">Final Score</p>
+    <div style="display:flex;gap:18px;justify-content:center;margin:12px 0">
+      <div style="text-align:center"><div style="font-weight:700">Team Lemons</div><div id="finalA" style="font-size:20px;color:gold">0</div></div>
+      <div style="text-align:center"><div style="font-weight:700">Team Limes</div><div id="finalB" style="font-size:20px;color:#7ee787">0</div></div>
+    </div>
+    <div class="final-buttons">
+      <button class="btn" onclick="playAgain()">Play Again</button>
+      <button class="btn secondary" onclick="closeFinal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="confetti" class="confetti"></canvas>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+<script>
+/* ======  Firebase config: PASTE YOURS HERE  ======
+   Replace the object below with the config from your Firebase console.
+   Example:
+   const firebaseConfig = {
+     apiKey: "...",
+     authDomain: "...",
+     databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+     projectId: "...",
+     storageBucket: "...",
+     messagingSenderId: "...",
+     appId: "..."
+   };
+*/
+const firebaseConfig = {
+  apiKey: "AIzaSyDeHp59bM4zWlpA_bwEkw-Ae2cDZS5n_WQ",
+  authDomain: "fued-98b90.firebaseapp.com",
+  databaseURL: "https://fued-98b90-default-rtdb.firebaseio.com",
+  projectId: "fued-98b90",
+  storageBucket: "fued-98b90.firebasestorage.app",
+  messagingSenderId: "1075046151873",
+  appId: "1:1075046151873:web:469ca2b00bbfc6620dc640",
+  measurementId: "G-VTSBY8JK18"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ---------- Game state & assets ---------- */
+const introSound = new Audio("https://www.soundjay.com/button/sounds/button-16.mp3");
+const flipSound = new Audio("https://www.myinstants.com/media/sounds/card-flip.mp3");
+const correctSound = new Audio("https://www.myinstants.com/media/sounds/family-feud-correct.mp3");
+const wrongSound = new Audio("https://www.myinstants.com/media/sounds/family-feud-wrong-answer.mp3");
+const fanfare = new Audio("https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3");
+
+let answersData = Array.from({length:8}, ()=>({text:'', points:'', revealed:false}));
+let teamA = 0, teamB = 0, strikesCount = 0;
+let soundOn = true;
+let isPlayerView = false;
+
+/* ---------- UI render functions (same as earlier) ---------- */
+function renderAnswers(){
+  const answersDiv = document.getElementById('answers');
+  const boardDiv = document.getElementById('board-answers');
+  answersDiv.innerHTML = '';
+  boardDiv.innerHTML = '';
+
+  answersData.forEach((a,i) => {
+    const row = document.createElement('div');
+    row.className = 'answer-row';
+    row.innerHTML = `
+      <div style="width:20px">${i+1}.</div>
+      <input type="text" value="${escapeHtml(a.text)}" onchange="updateAnswer(${i},this.value,'text')" />
+      <input type="text" value="${escapeHtml(a.points)}" onchange="updateAnswer(${i},this.value,'points')" placeholder="Points" style="width:80px" />
+      <button class="btn secondary" onclick="toggleReveal(${i})">${a.revealed ? 'Hide' : 'Reveal'}</button>
+    `;
+    answersDiv.appendChild(row);
+
+    const cardContainer = document.createElement('div');
+    cardContainer.className = 'board-answer';
+    const card = document.createElement('div');
+    card.className = 'card' + (a.revealed ? ' flipped' : '');
+    card.innerHTML = `
+      <div class="card-front"><div class="hidden-box"></div></div>
+      <div class="card-back"><div>${escapeHtml(a.text)}</div><div class="answer-points">${escapeHtml(a.points)}</div></div>
+    `;
+    cardContainer.appendChild(card);
+    cardContainer.onclick = () => revealOnClick(i, card);
+    boardDiv.appendChild(cardContainer);
+  });
+
+  renderStrikes();
+  document.getElementById('teamA').innerText = teamA;
+  document.getElementById('teamB').innerText = teamB;
+  document.getElementById('board-question').innerText = document.getElementById('question').value || '(No question)';
+
+  // Disable inputs & reveal buttons in Player View
+  if(isPlayerView){
+    document.querySelectorAll('.answer-row input, #question').forEach(el => el.disabled = true);
+    document.querySelectorAll('.answer-row button').forEach(btn => {
+      if(btn.innerText === 'Reveal' || btn.innerText === 'Hide'){
+        btn.disabled = true; btn.style.opacity = 0.5; btn.style.cursor='default';
+      }
+    });
+  }
+}
+
+function updateAnswer(idx,val,key){ answersData[idx][key] = val; renderAnswers(); }
+function toggleReveal(idx){ answersData[idx].revealed = !answersData[idx].revealed; if(answersData[idx].revealed && soundOn) playFlipAndDing(); renderAnswers(); }
+function revealOnClick(idx, cardElement){
+  if(!answersData[idx].revealed && !isPlayerView){
+    answersData[idx].revealed = true;
+    if(soundOn) playFlipAndDing();
+    cardElement.classList.add('flipped');
+  }
+}
+function revealAll(){ answersData.forEach(a=>a.revealed=true); if(soundOn) playFlipAndDing(); renderAnswers(); }
+function clearBoard(){ answersData = Array.from({length:8}, ()=>({text:'', points:'', revealed:false})); document.getElementById('question').value=''; strikesCount=0; renderAnswers(); }
+function triggerBuzzer(){ document.getElementById('buzzer').style.display='flex'; if(soundOn) wrongSound.play(); strikesCount=Math.min(3, strikesCount+1); renderStrikes(); setTimeout(()=>document.getElementById('buzzer').style.display='none',1200); }
+function renderStrikes(){ const sDiv=document.getElementById('strikes'); sDiv.innerHTML=''; for(let i=0;i<3;i++){ const el=document.createElement('div'); el.className='strike'+(i<strikesCount?' active':''); el.innerText=i<strikesCount?'X':''; sDiv.appendChild(el);} }
+function addPoints(team,pts){ if(team==='A'){ teamA=Math.max(0,teamA+pts); document.getElementById('teamA').innerText=teamA; } if(team==='B'){ teamB=Math.max(0,teamB+pts); document.getElementById('teamB').innerText=teamB; } }
+function nextRound(){ answersData.forEach(a=>a.revealed=false); strikesCount=0; renderStrikes(); renderAnswers(); if(soundOn) try{ introSound.currentTime=0; introSound.play().catch(()=>{});}catch(e){} }
+function toggleSound(){ soundOn=!soundOn; alert('Sound '+(soundOn?'ON':'OFF')); }
+function playFlipAndDing(){ try{ flipSound.currentTime=0; flipSound.play(); setTimeout(()=>{ correctSound.currentTime=0; correctSound.play(); },380);}catch(e){} }
+
+/* Final overlay and confetti functions (same as before) */
+function showFinal(){
+  const a = teamA, b = teamB;
+  let winner='Lemons', winnerLabel='Team Lemons';
+  if(b > a){ winner='Limes'; winnerLabel='Team Limes'; }
+  else if(b === a){ winner='Tie'; winnerLabel='Draw'; }
+  const overlay = document.getElementById('finalOverlay');
+  const title = document.getElementById('finalTitle');
+  const sub = document.getElementById('finalSubtitle');
+  document.getElementById('finalA').innerText = teamA;
+  document.getElementById('finalB').innerText = teamB;
+  if(winner === 'Tie'){ title.innerText = `It's a tie — Great game!`; sub.innerText = `Both teams rocked it.`; }
+  else{ title.innerText = `🎉 Give it up for ${winnerLabel} — our Family Feud Champions!`; sub.innerText = 'Final Score'; }
+  overlay.style.display = 'flex';
+  if(soundOn) try{ fanfare.currentTime=0; fanfare.play().catch(()=>{}); }catch(e){}
+  launchConfettiFullBlast();
+}
+function closeFinal(){ document.getElementById('finalOverlay').style.display='none'; }
+function playAgain(){ stopConfetti(); teamA=0; teamB=0; strikesCount=0; answersData = Array.from({length:8}, ()=>({text:'', points:'', revealed:false})); document.getElementById('question').value=''; document.getElementById('board-question').innerText=''; document.getElementById('finalOverlay').style.display='none'; renderAnswers(); }
+function resetScores(){ teamA=0; teamB=0; document.getElementById('teamA').innerText=teamA; document.getElementById('teamB').innerText=teamB; }
+
+/* Player view toggle */
+function togglePlayerView(){ isPlayerView = !isPlayerView; const panel=document.querySelector('.panel'); const board=document.querySelector('.game-board'); if(isPlayerView){ panel.style.display='none'; board.style.flex='1 1 100%'; renderAnswers(); } else { panel.style.display='block'; board.style.flex='2 1 60%'; renderAnswers(); } }
+
+/* Utility */
+document.getElementById('question').addEventListener('input', e=>{ document.getElementById('board-question').innerText = e.target.value; });
+function escapeHtml(s){ return String(s||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'); }
+
+/* Lightweight confetti (same approach) */
+const confettiCanvas = document.getElementById('confetti');
+let confettiCtx = confettiCanvas.getContext('2d'), confettiParticles=[], confettiRunning=false, confettiAnimId=null;
+function resizeCanvas(){ confettiCanvas.width = window.innerWidth; confettiCanvas.height = window.innerHeight; }
+window.addEventListener('resize', resizeCanvas); resizeCanvas();
+function randomRange(a,b){ return a + Math.random()*(b-a); }
+function createParticle(x,y,vx,vy,size,color){ return {x,y,vx,vy,size,color,rot:randomRange(0,360),rotSpeed:randomRange(-5,5)} }
+function launchConfettiFullBlast(){ confettiParticles=[]; for(let i=0;i<300;i++){ confettiParticles.push(createParticle(randomRange(0,window.innerWidth), randomRange(-400,0), randomRange(-2,2), randomRange(2,6), randomRange(6,12), `hsl(${Math.random()*360},100%,50%)`)); } if(!confettiRunning){ confettiRunning=true; animateConfetti(); setTimeout(stopConfetti,5000); } }
+function animateConfetti(){ confettiCtx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height); confettiParticles.forEach((p,i)=>{ p.x+=p.vx; p.y+=p.vy; p.rot+=p.rotSpeed; confettiCtx.save(); confettiCtx.translate(p.x,p.y); confettiCtx.rotate(p.rot*Math.PI/180); confettiCtx.fillStyle=p.color; confettiCtx.fillRect(-p.size/2,-p.size/2,p.size,p.size); confettiCtx.restore(); }); confettiParticles = confettiParticles.filter(p=>p.y < window.innerHeight + 50); confettiAnimId = requestAnimationFrame(animateConfetti); }
+function stopConfetti(){ confettiRunning=false; confettiParticles=[]; cancelAnimationFrame(confettiAnimId); confettiCtx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height); }
+
+/* ---------- FIREBASE SYNC LOGIC ---------- */
+function getRoomRef(){
+  const room = (document.getElementById('roomId').value || 'default-room').trim();
+  return db.ref('games/' + room);
+}
+
+// Host or player selection prompt (popup) - host = OK, player = Cancel
+const isHost = confirm("Are you the host? OK = host, Cancel = player view");
+if(!isHost) togglePlayerView();
+
+// Broadcast current state (host only)
+function broadcastUpdate(){
+  if(!isHost) return;
+  const roomRef = getRoomRef();
+  const payload = {
+    question: document.getElementById('question').value || '',
+    answersData,
+    teamA,
+    teamB,
+    strikesCount,
+    ts: Date.now()
+  };
+  roomRef.set(payload).catch(err => console.warn('firebase set failed', err));
+}
+
+// When room id changes on host, write initial snapshot for new room
+document.getElementById('roomId').addEventListener('change', () => { if(isHost) broadcastUpdate(); });
+
+// Hook host actions to broadcast (wrap existing functions)
+if(isHost){
+  document.getElementById('question').addEventListener('input', broadcastUpdate);
+  const _updateAnswer = updateAnswer;
+  updateAnswer = function(idx,val,key){ _updateAnswer(idx,val,key); broadcastUpdate(); }
+  const _toggleReveal = toggleReveal;
+  toggleReveal = function(idx){ _toggleReveal(idx); broadcastUpdate(); }
+  const _addPoints = addPoints;
+  addPoints = function(team,pts){ _addPoints(team,pts); broadcastUpdate(); }
+  const _triggerBuzzer = triggerBuzzer;
+  triggerBuzzer = function(){ _triggerBuzzer(); broadcastUpdate(); }
+  const _nextRound = nextRound;
+  nextRound = function(){ _nextRound(); broadcastUpdate(); }
+  const _revealAll = revealAll;
+  revealAll = function(){ _revealAll(); broadcastUpdate(); }
+  const _clearBoard = clearBoard;
+  clearBoard = function(){ _clearBoard(); broadcastUpdate(); }
+  const _resetScores = resetScores;
+  resetScores = function(){ _resetScores(); broadcastUpdate(); }
+}
+
+// Subscribe to DB updates (players get these updates automatically)
+let currentRoomRef = null;
+function subscribeRoom(){
+  if(currentRoomRef) currentRoomRef.off();
+  currentRoomRef = getRoomRef();
+  currentRoomRef.on('value', snapshot => {
+    const data = snapshot.val();
+    if(!data) return;
+    // If not host, apply incoming state; host could optionally ignore
+    if(!isHost){
+      document.getElementById('question').value = data.question || '';
+      answersData = data.answersData || answersData;
+      teamA = data.teamA || 0;
+      teamB = data.teamB || 0;
+      strikesCount = data.strikesCount || 0;
+      renderAnswers();
+    }
+  });
+}
+// subscribe now
+subscribeRoom();
+
+/* If room id changes while player is viewing, resubscribe */
+document.getElementById('roomId').addEventListener('change', subscribeRoom);
+
+// Initial render
+renderAnswers();
+
+</script>
+</body>
+</html>
